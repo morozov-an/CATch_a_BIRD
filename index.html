@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🐱 Кот и Птичка · Кирпичный платформер</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(145deg, #2a3a4a 0%, #141e28 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            padding: 12px;
+        }
+
+        .game-wrapper {
+            background: #1e2e3c;
+            padding: 20px 20px 24px;
+            border-radius: 40px;
+            box-shadow: 0 20px 30px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            width: 100%;
+            max-width: 900px;
+            height: auto;
+            border-radius: 24px;
+            background: linear-gradient(0deg, #c1d9eb 0%, #e0effa 100%);
+            box-shadow: inset 0 0 30px #3a5a6e, 0 6px 0 #0f171f;
+            cursor: pointer;
+            touch-action: none;  /* предотвращает скролл при тапе */
+        }
+
+        .info-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 16px 8px 4px 8px;
+            color: #e3eef8;
+            text-shadow: 0 2px 3px black;
+            font-weight: 600;
+        }
+
+        .control-hint {
+            background: #16232e;
+            padding: 10px 20px;
+            border-radius: 60px;
+            font-size: 1rem;
+            box-shadow: inset 0 1px 3px #2e4459, 0 4px 0 #0b1217;
+            color: #f2e9c2;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .reset-btn {
+            background: #d45e5e;
+            border: none;
+            color: white;
+            font-weight: bold;
+            font-size: 1.1rem;
+            padding: 8px 22px;
+            border-radius: 60px;
+            box-shadow: 0 5px 0 #7e3535, 0 2px 8px black;
+            cursor: pointer;
+            transition: 0.08s linear;
+            border: 1px solid #ffb4b4;
+            text-shadow: 0 1px 0 #4a1e1e;
+        }
+
+        .reset-btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 #7e3535, 0 2px 8px black;
+        }
+
+        .victory-message {
+            font-size: 1.2rem;
+            background: #f9e076;
+            color: #1e3a2f;
+            padding: 4px 16px;
+            border-radius: 40px;
+            font-weight: bold;
+            box-shadow: inset 0 1px 4px #fff3bf, 0 3px 0 #8b6f1c;
+        }
+
+        .status-area {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .emoji-badge {
+            font-size: 1.8rem;
+            line-height: 1;
+            filter: drop-shadow(0 3px 2px #00000060);
+        }
+
+        /* мобильная адаптация */
+        @media (max-width: 600px) {
+            .control-hint { font-size: 0.9rem; padding: 8px 12px; }
+            .reset-btn { font-size: 1rem; padding: 6px 16px; }
+        }
+    </style>
+</head>
+<body>
+<div class="game-wrapper">
+    <canvas id="gameCanvas" width="900" height="500"></canvas>
+
+    <div class="info-panel">
+        <div class="emoji-badge">🐱 🧱 🐦</div>
+        <div class="status-area">
+            <div id="victoryDisplay" class="victory-message"></div>
+            <button class="reset-btn" id="resetButton">🔄 заново</button>
+        </div>
+    </div>
+
+    <div id="hintBox" class="control-hint">
+        <!-- подсказка заполнится динамически -->
+    </div>
+</div>
+
+<script>
+    (function(){
+        "use strict";
+
+        // ---------- НАСТРОЙКИ ----------
+        const CANVAS_WIDTH = 900;
+        const CANVAS_HEIGHT = 500;
+        const GROUND_Y = 470;        // "пол" (нижняя платформа)
+        const PLATFORM_HEIGHT = 28;
+        const PLAYER_SIZE = 40;       // размер эмодзи
+        const GRAVITY = 0.95;
+        const JUMP_FORCE = -9.2;
+        const WALK_SPEED = 4.2;
+        
+        // этажи (5 этажей)
+        const FLOORS = 5;
+        const FLOOR_SPACING = 82;     // расстояние по Y между этажами
+
+        // ---------- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const victoryDisplay = document.getElementById('victoryDisplay');
+        const hintBox = document.getElementById('hintBox');
+
+        // платформы
+        let platforms = [];
+        // игрок
+        let player = {
+            x: 80, y: GROUND_Y - PLAYER_SIZE,
+            vx: 0, vy: 0,
+            width: PLAYER_SIZE, height: PLAYER_SIZE,
+            canJump: false,
+            facing: 1            // 1 = вправо, -1 = влево (для отрисовки эмоций)
+        };
+
+        // птичка
+        let bird = { x: 780, y: 0, width: 44, height: 44 };
+        
+        let victory = false;
+        let heartParticles = [];
+        
+        // управление
+        let leftPressed = false;
+        let rightPressed = false;
+        let jumpPressed = false;
+        
+        // определение устройства (тач или мышь)
+        let isTouchDevice = false;
+        let lastTapTime = 0;
+        const DOUBLE_TAP_DELAY = 300; // мс
+
+        // ---------- ГЕНЕРАЦИЯ ПЛАТФОРМ (5 этажей, кирпичи с промежутками) ----------
+        function generatePlatforms() {
+            const newPlatforms = [];
+            const baseY = GROUND_Y;
+            
+            // полный этаж 1 (самый нижний) — сплошная длинная платформа, чтобы кот не падал сразу
+            newPlatforms.push({
+                x: 0, y: baseY,
+                width: 900, height: PLATFORM_HEIGHT,
+                type: 'brick'
+            });
+
+            // этажи 2,3,4,5 (индекс 1..4) с разрывами
+            for (let floor = 1; floor < FLOORS; floor++) {
+                const floorY = baseY - floor * FLOOR_SPACING;
+                
+                // генерируем от 2 до 4 сегментов кирпичей на этаж, с пропусками
+                const segments = [];
+                const gapProbability = 0.45; // шанс пропуска между кусками
+                
+                let currentX = 40;
+                const maxX = 860;
+                
+                while (currentX < maxX) {
+                    // случайная ширина кирпичного блока
+                    const blockWidth = Math.floor(Math.random() * 110) + 90; // 90..200
+                    const endX = Math.min(currentX + blockWidth, maxX);
+                    
+                    segments.push({
+                        x: currentX,
+                        y: floorY,
+                        width: endX - currentX,
+                        height: PLATFORM_HEIGHT,
+                        type: 'brick'
+                    });
+                    
+                    currentX = endX;
+                    
+                    // случайный пропуск (дыра)
+                    if (currentX < maxX - 60 && Math.random() < gapProbability) {
+                        const gapSize = Math.floor(Math.random() * 70) + 150; // 50..120
+                        currentX += gapSize;
+                    } else {
+                        // небольшой зазор между блоками, но не критичный
+                        currentX += 50 + Math.floor(Math.random() * 20);
+                    }
+                }
+                
+                // гарантируем, что хотя бы одна платформа есть на этаже (если совсем пусто - добавим одну)
+                if (segments.length === 0) {
+                    segments.push({
+                        x: 200, y: floorY,
+                        width: 300, height: PLATFORM_HEIGHT,
+                        type: 'brick'
+                    });
+                }
+                
+                newPlatforms.push(...segments);
+            }
+            
+            // установим позицию птички на самом верхнем этаже (floor = 4, y)
+            const topFloorY = baseY - 4 * FLOOR_SPACING;
+            bird.y = topFloorY - bird.height + 6; // стоит на платформе
+            
+            // убедимся, что под птичкой есть платформа (иначе добавим)
+            const birdPlatform = newPlatforms.find(p => 
+                Math.abs(p.y - topFloorY) < 5 && 
+                bird.x + 10 >= p.x && bird.x + bird.width - 10 <= p.x + p.width
+            );
+            if (!birdPlatform) {
+                // создаём надёжную платформу под птичку
+                newPlatforms.push({
+                    x: bird.x - 20, y: topFloorY,
+                    width: 140, height: PLATFORM_HEIGHT,
+                    type: 'brick'
+                });
+            }
+            
+            return newPlatforms;
+        }
+
+        // ---------- СБРОС ИГРЫ ----------
+        function resetGame() {
+            platforms = generatePlatforms();
+            player = {
+                x: 80, y: GROUND_Y - PLAYER_SIZE,
+                vx: 0, vy: 0,
+                width: PLAYER_SIZE, height: PLAYER_SIZE,
+                canJump: false,
+                facing: 1
+            };
+            victory = false;
+            heartParticles = [];
+            victoryDisplay.innerHTML = '';
+            
+            leftPressed = false;
+            rightPressed = false;
+            jumpPressed = false;
+        }
+
+        // ---------- ОПРЕДЕЛЕНИЕ УСТРОЙСТВА И ПОДСКАЗКА ----------
+        function detectAndUpdateHint() {
+            // Проверяем, тач-устройство ли (учитываем pointer: coarse)
+            isTouchDevice = ('ontouchstart' in window) || 
+                            (navigator.maxTouchPoints > 0) || 
+                            (navigator.msMaxTouchPoints > 0);
+            
+            // Доп. проверка через media (более точная)
+            if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
+                isTouchDevice = true;
+            }
+            
+            let hintText = '';
+            if (isTouchDevice) {
+                hintText = '📱 Тап слева от кота ←  |  Тап справа →  |  Двойной тап — прыжок ⬆️';
+            } else {
+                hintText = '💻 ← → стрелки — идти  |  ↑ или ПРОБЕЛ — прыжок';
+            }
+            hintBox.innerHTML = hintText;
+        }
+
+        // ---------- ФИЗИКА И КОЛЛИЗИИ ----------
+        function applyCollisions() {
+            player.canJump = false;
+            
+            // горизонтальное движение
+            player.x += player.vx;
+            
+            // границы канваса (не выходим за края)
+            player.x = Math.max(2, Math.min(CANVAS_WIDTH - player.width - 2, player.x));
+            
+            // коллизия по X
+            for (let pl of platforms) {
+                if (player.vy >= 0 && player.y + player.height > pl.y && player.y < pl.y + pl.height) {
+                    if (player.x + player.width > pl.x && player.x < pl.x + pl.width) {
+                        // выталкиваем
+                        if (player.vx > 0) player.x = pl.x - player.width;
+                        else if (player.vx < 0) player.x = pl.x + pl.width;
+                        player.vx = 0;
+                    }
+                }
+            }
+            
+            // вертикальное движение
+            player.y += player.vy;
+            player.vy += GRAVITY;
+            
+            // проверка платформ по Y
+            for (let pl of platforms) {
+                if (player.y + player.height > pl.y && player.y < pl.y + pl.height) {
+                    if (player.x + player.width > pl.x && player.x < pl.x + pl.width) {
+                        // приземление сверху
+                        if (player.vy >= 0) {
+                            player.y = pl.y - player.height;
+                            player.vy = 0;
+                            player.canJump = true;
+                        }
+                        // удар головой
+                        //else if (player.vy < 0) {
+                        //    player.y = pl.y + pl.height;
+                        //    player.vy = 0;
+                        //}
+                    }
+                }
+            }
+            
+            // не проваливаемся ниже пола (страховка)
+            if (player.y + player.height > GROUND_Y + 20) {
+                player.y = GROUND_Y - player.height;
+                player.vy = 0;
+                player.canJump = true;
+            }
+            
+            // Остановка движения по инерции (если клавиши не нажаты)
+            if (!leftPressed && !rightPressed) {
+                player.vx *= 0.99;
+                if (Math.abs(player.vx) < 0.05) player.vx = 0;
+            }
+        }
+
+        // ---------- ОБРАБОТКА ВВОДА ----------
+        function handleInput() {
+            if (victory) {
+                // в победе управление отключается, только сброс
+                player.vx *= 0.8;
+                return;
+            }
+            
+            // движение влево/вправо
+            if (leftPressed) {
+                player.vx = -WALK_SPEED;
+                player.facing = -1;
+            }
+            if (rightPressed) {
+                player.vx = WALK_SPEED;
+                player.facing = 1;
+            }
+            
+            // прыжок
+            if (jumpPressed && player.canJump) {
+                player.vy = JUMP_FORCE;
+                player.canJump = false;
+                jumpPressed = false; // однократный прыжок
+            }
+        }
+
+        // ---------- ПРОВЕРКА ПОБЕДЫ ----------
+        function checkVictory() {
+            if (victory) return true;
+            
+            const catRect = { x: player.x, y: player.y, w: player.width, h: player.height };
+            const birdRect = { x: bird.x, y: bird.y, w: bird.width, h: bird.height };
+            
+            if (catRect.x < birdRect.x + birdRect.w &&
+                catRect.x + catRect.w > birdRect.x &&
+                catRect.y < birdRect.y + birdRect.h &&
+                catRect.y + catRect.h > birdRect.y) {
+                
+                victory = true;
+                victoryDisplay.innerHTML = '🏆 ПОБЕДА! ❤️';
+                
+                // генерируем сердечки
+                for (let i = 0; i < 16; i++) {
+                    heartParticles.push({
+                        x: (player.x + bird.x) / 2 + (Math.random() - 0.5) * 60,
+                        y: player.y - 20 + Math.random() * 50,
+                        vx: (Math.random() - 0.5) * 2.5,
+                        vy: -1.5 - Math.random() * 3,
+                        life: 1.0,
+                        size: 20 + Math.floor(Math.random() * 22)
+                    });
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // ---------- ОТРИСОВКА ----------
+        function draw() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            // фон (небо с облачками)
+            ctx.fillStyle = '#c1d9eb';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            // декоративные облачка
+            ctx.fillStyle = '#ffffffb0';
+            ctx.beginPath();
+            ctx.arc(120, 60, 35, 0, Math.PI*2);
+            ctx.arc(170, 40, 30, 0, Math.PI*2);
+            ctx.arc(210, 60, 28, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffffc0';
+            ctx.beginPath();
+            ctx.arc(700, 90, 40, 0, Math.PI*2);
+            ctx.arc(760, 70, 32, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            // платформы (кирпичи 🧱)
+            platforms.forEach(pl => {
+                // рисуем несколько эмодзи кирпичей в ряд
+                const brickEmoji = '🧱';
+				//ctx.fillStyle = '#8B4513'; // коричневый фон
+				//ctx.fillRect(pl.x + i * 26, pl.y - 2, 26, PLATFORM_HEIGHT+2);
+                ctx.font = `${PLATFORM_HEIGHT+2}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Android Emoji", "EmojiOne Color", "Twemoji Mozilla", "Twemoji", sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                
+                const count = Math.floor(pl.width / 26);
+                for (let i = 0; i < count; i++) {
+                    ctx.fillText(brickEmoji, pl.x + i * 26, pl.y - 2);
+                }
+                // тень под кирпичами
+                //ctx.fillStyle = '#6b4f3c30';
+                //ctx.fillRect(pl.x, pl.y+2, pl.width, 6);
+            });
+            
+            // птичка 🐦
+            ctx.font = `${bird.height}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🐦', bird.x + bird.width/2, bird.y + bird.height/2 - 2);
+            
+            // кот 🐱 (отражение по направлению)
+            ctx.save();
+            ctx.font = `${player.height}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Android Emoji", "EmojiOne Color", "Twemoji Mozilla", "Twemoji", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const catCenterX = player.x + player.width/2;
+            const catCenterY = player.y + player.height/2;
+            
+            if (player.facing === -1) {
+                ctx.translate(catCenterX, catCenterY);
+                ctx.scale(-1, 1);
+                ctx.fillText('🐱', 0, 0);
+            } else {
+                ctx.fillText('🐱', catCenterX, catCenterY);
+            }
+            ctx.restore();
+            
+            // частицы сердечек при победе
+            if (victory) {
+                heartParticles.forEach(p => {
+                    ctx.font = `${p.size}px "Segoe UI Emoji", "Apple Color Emoji"`;
+                    ctx.fillStyle = `rgba(255, 80, 120, ${p.life})`;
+                    ctx.fillText('❤️', p.x, p.y);
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.08;
+                    p.life -= 0.008;
+                });
+                heartParticles = heartParticles.filter(p => p.life > 0.02);
+            }
+            
+            // подсказка по управлению прямо на canvas (небольшая)
+            if (!victory) {
+                ctx.font = 'bold 15px "Segoe UI", system-ui';
+                ctx.fillStyle = '#1e3b4f';
+                ctx.fillText('←🐱→  |  ⬆️ прыжок', 20, 40);
+            }
+        }
+
+        // ---------- ИГРОВОЙ ЦИКЛ ----------
+        function gameLoop() {
+            if (!victory) {
+                handleInput();
+                applyCollisions();
+                checkVictory();
+            } else {
+                // обновление частиц
+                heartParticles.forEach(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.08;
+                    p.life -= 0.008;
+                });
+                heartParticles = heartParticles.filter(p => p.life > 0.02);
+            }
+            
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ---------- УПРАВЛЕНИЕ (клавиатура + тач) ----------
+        function initControls() {
+            window.addEventListener('keydown', (e) => {
+                if (victory) return;
+                const key = e.key;
+                // предотвращаем скролл стрелками и пробелом
+                if (key === ' ' || key === 'Spacebar' || key === 'Space' ||
+                    key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp') {
+                    e.preventDefault();
+                }
+                
+                if (key === 'ArrowLeft') leftPressed = true;
+                if (key === 'ArrowRight') rightPressed = true;
+                if (key === 'ArrowUp' || key === ' ' || key === 'Space') {
+                    if (!jumpPressed) jumpPressed = true;
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                const key = e.key;
+                if (key === 'ArrowLeft') leftPressed = false;
+                if (key === 'ArrowRight') rightPressed = false;
+                if (key === 'ArrowUp' || key === ' ' || key === 'Space') {
+                    jumpPressed = false;
+                }
+                e.preventDefault();
+            });
+            
+            // Тач-управление (для телефона)
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (victory) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                const touch = e.touches[0];
+                const canvasX = (touch.clientX - rect.left) * scaleX;
+                const canvasY = (touch.clientY - rect.top) * scaleY;
+                
+                const now = Date.now();
+                const timeSinceLastTap = now - lastTapTime;
+                
+                // центр кота
+                const catCenterX = player.x + player.width/2;
+                
+                if (timeSinceLastTap < DOUBLE_TAP_DELAY && timeSinceLastTap > 0) {
+                    // двойной тап — прыжок
+                    jumpPressed = true;
+                    lastTapTime = 0;
+                } else {
+                    // одиночный тап: движение
+                    if (canvasX < catCenterX - 15) {
+                        leftPressed = true;
+                        rightPressed = false;
+                    } else if (canvasX > catCenterX + 15) {
+                        rightPressed = true;
+                        leftPressed = false;
+                    }
+                    lastTapTime = now;
+                }
+            }, { passive: false });
+            
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                leftPressed = false;
+                rightPressed = false;
+                // прыжок отключается после кадра
+            });
+            
+            canvas.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                leftPressed = false;
+                rightPressed = false;
+            });
+            
+            // мышь для ПК (можно дополнительно, но не обязательно)
+            // сброс jumpPressed после использования
+        }
+
+        // кнопка сброса
+        document.getElementById('resetButton').addEventListener('click', () => {
+            resetGame();
+        });
+
+        // старт
+        function init() {
+            resetGame();
+            detectAndUpdateHint();
+            initControls();
+            gameLoop();
+            
+            // при изменении размера окна подсказка может обновиться
+            window.addEventListener('resize', () => {
+                detectAndUpdateHint();
+            });
+        }
+
+        init();
+    })();
+</script>
+</body>
+</html>
